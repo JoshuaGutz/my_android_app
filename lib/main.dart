@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-// import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const MaterialApp(home: TwitchApp()));
 }
 
-// This helper class keeps track of each tab's name and its own controller
 class TwitchTab {
   String title;
   WebViewController controller;
@@ -26,11 +24,16 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    // Start with the Login tab by default
-    _addTab("Login", "https://www.twitch.tv/login");
+    // We start with no tabs now, which triggers the auto-popup logic
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkTabsAndShowDialog());
   }
 
-  // Logic to add a new tab
+  void _checkTabsAndShowDialog() {
+    if (myTabs.isEmpty) {
+      _showAddDialog();
+    }
+  }
+
   void _addTab(String title, String url) {
     setState(() {
       final newController = WebViewController()
@@ -38,19 +41,20 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
         ..loadRequest(Uri.parse(url));
       
       myTabs.add(TwitchTab(title: title, controller: newController));
-      
-      // Update the TabController to handle the new number of tabs
       _tabController = TabController(length: myTabs.length, vsync: this);
-      _tabController!.animateTo(myTabs.length - 1); // Jump to the new tab
+      _tabController!.animateTo(myTabs.length - 1);
     });
   }
 
-  // Logic to close a tab
   void _closeTab(int index) {
-    if (myTabs.length <= 1) return; // Don't close the last remaining tab
     setState(() {
       myTabs.removeAt(index);
-      _tabController = TabController(length: myTabs.length, vsync: this);
+      if (myTabs.isNotEmpty) {
+        _tabController = TabController(length: myTabs.length, vsync: this);
+      } else {
+        _tabController = null;
+        _checkTabsAndShowDialog(); // Show dialog if last tab closed
+      }
     });
   }
 
@@ -59,29 +63,41 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Twitch Multi-Tool"),
-        leading: IconButton(
-          icon: const Icon(Icons.add_box),
-          onPressed: () => _showAddDialog(),
-        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => myTabs[_tabController!.index].controller.reload(),
+            icon: const Icon(Icons.add_box),
+            onPressed: () => _showAddDialog(),
           ),
+          if (myTabs.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () => myTabs[_tabController!.index].controller.reload(),
+            ),
         ],
-        bottom: myTabs.isEmpty ? null : TabBar(
+      ),
+      body: myTabs.isEmpty 
+        ? const Center(child: Text("No tabs open. Tap + to add one.")) 
+        : TabBarView(
+            controller: _tabController,
+            physics: const NeverScrollableScrollPhysics(), // FIX: Disables swipe to switch tabs
+            children: myTabs.map((tab) => WebViewWidget(controller: tab.controller)).toList(),
+          ),
+      bottomNavigationBar: myTabs.isEmpty ? null : Material(
+        color: Theme.of(context).primaryColor,
+        child: TabBar(
           controller: _tabController,
           isScrollable: true,
+          indicatorColor: Colors.white,
           tabs: myTabs.asMap().entries.map((entry) {
-            int idx = entry.key;
             return Tab(
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(entry.value.title),
+                  Text(entry.value.title, style: const TextStyle(color: Colors.white)),
                   const SizedBox(width: 8),
                   GestureDetector(
-                    onTap: () => _closeTab(idx),
-                    child: const Icon(Icons.close, size: 16),
+                    onTap: () => _closeTab(entry.key),
+                    child: const Icon(Icons.close, size: 16, color: Colors.white),
                   ),
                 ],
               ),
@@ -89,43 +105,63 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
           }).toList(),
         ),
       ),
-      body: myTabs.isEmpty 
-        ? const Center(child: Text("Tap + to add a tab")) 
-        : TabBarView(
-            controller: _tabController,
-            children: myTabs.map((tab) => WebViewWidget(controller: tab.controller)).toList(),
-          ),
     );
   }
 
   void _showAddDialog() {
     TextEditingController channelController = TextEditingController();
+    
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Add New Tab"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: channelController, decoration: const InputDecoration(hintText: "Channel Name")),
-            const SizedBox(height: 10),
-            ElevatedButton(
-              onPressed: () {
-                _addTab("Panel: ${channelController.text}", "https://www.twitch.tv/popout/${channelController.text}/extensions/pm0qkv9g4h87t5y6lg329oam8j7ze9/panel");
-                Navigator.pop(context);
-              }, 
-              child: const Text("Add Extension Panel")
-            ),
-            ElevatedButton(
-              onPressed: () {
-                _addTab("Chat: ${channelController.text}", "https://www.twitch.tv/popout/${channelController.text}/chat?popout=");
-                Navigator.pop(context);
-              }, 
-              child: const Text("Add Chat")
-            ),
-          ],
-        ),
-      ),
+      barrierDismissible: myTabs.isNotEmpty, // Cannot tap outside to close if 0 tabs
+      builder: (context) {
+        return StatefulBuilder( // Allows the dialog buttons to update as you type
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text("Add New Tab"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: channelController,
+                    decoration: const InputDecoration(hintText: "Channel Name (Defaults to deemonrider)"),
+                    onChanged: (val) => setDialogState(() {}), // Refresh buttons as you type
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: () {
+                      // Whitespace stripping logic
+                      String name = channelController.text.trim();
+                      if (name.isEmpty) name = "deemonrider";
+                      _addTab("Panel: $name", "https://www.twitch.tv/popout/$name/extensions/pm0qkv9g4h87t5y6lg329oam8j7ze9/panel");
+                      Navigator.pop(context);
+                    }, 
+                    child: const Text("Add Extension Panel")
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    // Greyed out logic: null onPressed = disabled button
+                    onPressed: channelController.text.trim().isEmpty ? null : () {
+                      String name = channelController.text.trim();
+                      _addTab("Chat: $name", "https://www.twitch.tv/popout/$name/chat?popout=");
+                      Navigator.pop(context);
+                    }, 
+                    child: const Text("Add Chat")
+                  ),
+                  const SizedBox(height: 10),
+                  TextButton(
+                    onPressed: () {
+                      _addTab("Login", "https://www.twitch.tv/login");
+                      Navigator.pop(context);
+                    },
+                    child: const Text("Add Login Tab")
+                  )
+                ],
+              ),
+            );
+          }
+        );
+      },
     );
   }
 }
