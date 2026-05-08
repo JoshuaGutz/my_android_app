@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const MaterialApp(
-    debugShowCheckedModeBanner: false, // Hides the "Debug" banner
+    debugShowCheckedModeBanner: false,
     home: TwitchApp(),
   ));
 }
@@ -23,11 +24,30 @@ class TwitchApp extends StatefulWidget {
 class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
   List<TwitchTab> myTabs = [];
   TabController? _tabController;
+  bool isLeftHanded = false; // Our new preference variable
 
   @override
   void initState() {
     super.initState();
+    _loadHandedness(); // Load your preference on startup
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkTabsAndShowDialog());
+  }
+
+  // Load the saved preference from the phone's memory
+  Future<void>_loadHandedness() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      isLeftHanded = prefs.getBool('isLeftHanded') ?? false;
+    });
+  }
+
+  // Save the preference
+  Future<void> _toggleHandedness(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isLeftHanded', value);
+    setState(() {
+      isLeftHanded = value;
+    });
   }
 
   void _checkTabsAndShowDialog() {
@@ -71,8 +91,20 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    // We define the two buttons as a reusable list
+    List<Widget> actionButtons = [
+      IconButton(
+        icon: const Icon(Icons.add_box, color: Colors.white),
+        onPressed: () => _showAddDialog(),
+      ),
+      if (myTabs.isNotEmpty)
+        IconButton(
+          icon: const Icon(Icons.refresh, color: Colors.white),
+          onPressed: () => myTabs[_tabController!.index].controller.reload(),
+        ),
+    ];
+
     return Scaffold(
-      // SafeArea prevents content from going under the status bar/clock
       body: SafeArea(
         child: myTabs.isEmpty 
           ? const Center(child: Text("No tabs open.")) 
@@ -83,57 +115,40 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
             ),
       ),
       bottomNavigationBar: Container(
-        height: 90, // Slightly taller to accommodate buttons + tabs
-        color: const Color(0xFF9146FF), // Twitch Purple
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Top part of the bar: Global Buttons
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.add_box, color: Colors.white),
-                    onPressed: () => _showAddDialog(),
-                  ),
-                  const Text("Twitch Multi-Tool", style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  if (myTabs.isNotEmpty)
-                    IconButton(
-                      icon: const Icon(Icons.refresh, color: Colors.white),
-                      onPressed: () => myTabs[_tabController!.index].controller.reload(),
-                    ),
-                ],
-              ),
-            ),
-            // Bottom part: The Scrollable Tabs
-            if (myTabs.isNotEmpty)
-              Expanded(
-                child: TabBar(
-                  controller: _tabController,
-                  isScrollable: true,
-                  indicatorColor: Colors.white,
-                  tabs: myTabs.asMap().entries.map((entry) {
-                    return Tab(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(entry.value.title, style: const TextStyle(color: Colors.white)),
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () => _closeTab(entry.key),
-                            child: const Icon(Icons.close, size: 16, color: Colors.white54),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-          ],
+        height: 85, 
+        color: const Color(0xFF9146FF),
+        child: Row(
+          // This flips the order of the buttons and tabs based on your setting!
+          children: isLeftHanded 
+            ? [...actionButtons, Expanded(child: _buildTabBar())] 
+            : [Expanded(child: _buildTabBar()), ...actionButtons],
         ),
       ),
+    );
+  }
+
+  // Helper to build the Tab portion specifically
+  Widget _buildTabBar() {
+    if (myTabs.isEmpty) return const SizedBox();
+    return TabBar(
+      controller: _tabController,
+      isScrollable: true,
+      indicatorColor: Colors.white,
+      tabs: myTabs.asMap().entries.map((entry) {
+        return Tab(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(entry.value.title, style: const TextStyle(color: Colors.white)),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () => _closeTab(entry.key),
+                child: const Icon(Icons.close, size: 16, color: Colors.white54),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -143,43 +158,57 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
       context: context,
       barrierDismissible: myTabs.isNotEmpty,
       builder: (context) {
-        return AlertDialog(
-          title: const Text("Add New Tab"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: channelController,
-                decoration: const InputDecoration(hintText: "Channel (Defaults to deemonrider)"),
+        return StatefulBuilder( // Added to handle the switch UI inside the popup
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text("Settings & New Tab"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Handedness Switch
+                  SwitchListTile(
+                    title: const Text("Left Handed Mode"),
+                    value: isLeftHanded,
+                    onChanged: (bool value) {
+                      _toggleHandedness(value);
+                      setDialogState(() {}); // Refresh the dialog UI
+                    },
+                  ),
+                  const Divider(),
+                  TextField(
+                    controller: channelController,
+                    decoration: const InputDecoration(hintText: "Channel (Defaults to deemonrider)"),
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    onPressed: () {
+                      String name = channelController.text.trim();
+                      if (name.isEmpty) name = "deemonrider";
+                      _addTab("Panel: $name", "https://www.twitch.tv/popout/$name/extensions/pm0qkv9g4h87t5y6lg329oam8j7ze9/panel");
+                      Navigator.pop(context);
+                    }, 
+                    child: const Text("Add Extension Panel")
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      String name = channelController.text.trim();
+                      if (name.isEmpty) name = "deemonrider";
+                      _addTab("Chat: $name", "https://www.twitch.tv/popout/$name/chat?popout=");
+                      Navigator.pop(context);
+                    }, 
+                    child: const Text("Add Chat")
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      _addTab("Login", "https://www.twitch.tv/login");
+                      Navigator.pop(context);
+                    },
+                    child: const Text("Add Login Tab")
+                  )
+                ],
               ),
-              const SizedBox(height: 10),
-              ElevatedButton(
-                onPressed: () {
-                  String name = channelController.text.trim();
-                  if (name.isEmpty) name = "deemonrider";
-                  _addTab("Panel: $name", "https://www.twitch.tv/popout/$name/extensions/pm0qkv9g4h87t5y6lg329oam8j7ze9/panel");
-                  Navigator.pop(context);
-                }, 
-                child: const Text("Add Extension Panel")
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  String name = channelController.text.trim();
-                  if (name.isEmpty) name = "deemonrider";
-                  _addTab("Chat: $name", "https://www.twitch.tv/popout/$name/chat?popout=");
-                  Navigator.pop(context);
-                }, 
-                child: const Text("Add Chat")
-              ),
-              TextButton(
-                onPressed: () {
-                  _addTab("Login", "https://www.twitch.tv/login");
-                  Navigator.pop(context);
-                },
-                child: const Text("Add Login Tab")
-              )
-            ],
-          ),
+            );
+          }
         );
       },
     );
