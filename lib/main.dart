@@ -24,7 +24,6 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    // We start with no tabs now, which triggers the auto-popup logic
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkTabsAndShowDialog());
   }
 
@@ -34,13 +33,25 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
     }
   }
 
+  // Helper to create a controller with "Deep Link" protection
+  WebViewController _createController(String url) {
+    return WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onNavigationRequest: (NavigationRequest request) {
+            // This prevents the "Open in Twitch App" popup by forcing
+            // all navigation to stay inside THIS webview.
+            return NavigationDecision.navigate;
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse(url));
+  }
+
   void _addTab(String title, String url) {
     setState(() {
-      final newController = WebViewController()
-        ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..loadRequest(Uri.parse(url));
-      
-      myTabs.add(TwitchTab(title: title, controller: newController));
+      myTabs.add(TwitchTab(title: title, controller: _createController(url)));
       _tabController = TabController(length: myTabs.length, vsync: this);
       _tabController!.animateTo(myTabs.length - 1);
     });
@@ -53,7 +64,7 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
         _tabController = TabController(length: myTabs.length, vsync: this);
       } else {
         _tabController = null;
-        _checkTabsAndShowDialog(); // Show dialog if last tab closed
+        _checkTabsAndShowDialog();
       }
     });
   }
@@ -64,10 +75,7 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
       appBar: AppBar(
         title: const Text("Twitch Multi-Tool"),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add_box),
-            onPressed: () => _showAddDialog(),
-          ),
+          IconButton(icon: const Icon(Icons.add_box), onPressed: () => _showAddDialog()),
           if (myTabs.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.refresh),
@@ -76,13 +84,15 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
         ],
       ),
       body: myTabs.isEmpty 
-        ? const Center(child: Text("No tabs open. Tap + to add one.")) 
+        ? const Center(child: Text("No tabs open.")) 
         : TabBarView(
             controller: _tabController,
-            physics: const NeverScrollableScrollPhysics(), // FIX: Disables swipe to switch tabs
+            physics: const NeverScrollableScrollPhysics(),
             children: myTabs.map((tab) => WebViewWidget(controller: tab.controller)).toList(),
           ),
-      bottomNavigationBar: myTabs.isEmpty ? null : Material(
+      // Sizedbox here makes the bottom bar 50% thicker (height 80 instead of standard ~50)
+      bottomNavigationBar: myTabs.isEmpty ? null : Container(
+        height: 80, 
         color: Theme.of(context).primaryColor,
         child: TabBar(
           controller: _tabController,
@@ -93,11 +103,11 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(entry.value.title, style: const TextStyle(color: Colors.white)),
-                  const SizedBox(width: 8),
+                  Text(entry.value.title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+                  const SizedBox(width: 12),
                   GestureDetector(
                     onTap: () => _closeTab(entry.key),
-                    child: const Icon(Icons.close, size: 16, color: Colors.white),
+                    child: const Icon(Icons.close, size: 20, color: Colors.white),
                   ),
                 ],
               ),
@@ -110,56 +120,49 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
 
   void _showAddDialog() {
     TextEditingController channelController = TextEditingController();
-    
     showDialog(
       context: context,
-      barrierDismissible: myTabs.isNotEmpty, // Cannot tap outside to close if 0 tabs
+      barrierDismissible: myTabs.isNotEmpty,
       builder: (context) {
-        return StatefulBuilder( // Allows the dialog buttons to update as you type
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text("Add New Tab"),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: channelController,
-                    decoration: const InputDecoration(hintText: "Channel Name (Defaults to deemonrider)"),
-                    onChanged: (val) => setDialogState(() {}), // Refresh buttons as you type
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: () {
-                      // Whitespace stripping logic
-                      String name = channelController.text.trim();
-                      if (name.isEmpty) name = "deemonrider";
-                      _addTab("Panel: $name", "https://www.twitch.tv/popout/$name/extensions/pm0qkv9g4h87t5y6lg329oam8j7ze9/panel");
-                      Navigator.pop(context);
-                    }, 
-                    child: const Text("Add Extension Panel")
-                  ),
-                  const SizedBox(height: 10),
-                  ElevatedButton(
-                    // Greyed out logic: null onPressed = disabled button
-                    onPressed: channelController.text.trim().isEmpty ? null : () {
-                      String name = channelController.text.trim();
-                      _addTab("Chat: $name", "https://www.twitch.tv/popout/$name/chat?popout=");
-                      Navigator.pop(context);
-                    }, 
-                    child: const Text("Add Chat")
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: () {
-                      _addTab("Login", "https://www.twitch.tv/login");
-                      Navigator.pop(context);
-                    },
-                    child: const Text("Add Login Tab")
-                  )
-                ],
+        return AlertDialog(
+          title: const Text("Add New Tab"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: channelController,
+                decoration: const InputDecoration(hintText: "Channel (Defaults to deemonrider)"),
               ),
-            );
-          }
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () {
+                  String name = channelController.text.trim();
+                  if (name.isEmpty) name = "deemonrider";
+                  _addTab("Panel: $name", "https://www.twitch.tv/popout/$name/extensions/pm0qkv9g4h87t5y6lg329oam8j7ze9/panel");
+                  Navigator.pop(context);
+                }, 
+                child: const Text("Add Extension Panel")
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton(
+                onPressed: () {
+                  String name = channelController.text.trim();
+                  if (name.isEmpty) name = "deemonrider"; // Default for chat too!
+                  _addTab("Chat: $name", "https://www.twitch.tv/popout/$name/chat?popout=");
+                  Navigator.pop(context);
+                }, 
+                child: const Text("Add Chat")
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () {
+                  _addTab("Login", "https://www.twitch.tv/login");
+                  Navigator.pop(context);
+                },
+                child: const Text("Add Login Tab")
+              )
+            ],
+          ),
         );
       },
     );
