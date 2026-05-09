@@ -13,14 +13,15 @@ void main() {
 class TwitchTab {
   String type; 
   String channel;
+  String? nickname;
   WebViewController? controller;
 
-  TwitchTab({required this.type, required this.channel, this.controller});
+  TwitchTab({required this.type, required this.channel, this.nickname, this.controller});
 
-  Map<String, dynamic> toJson() => {'type': type, 'channel': channel};
+  Map<String, dynamic> toJson() => {'type': type, 'channel': channel, 'nickname': nickname};
 
   factory TwitchTab.fromJson(Map<String, dynamic> json) {
-    return TwitchTab(type: json['type'], channel: json['channel']);
+    return TwitchTab(type: json['type'], channel: json['channel'], nickname: json['nickname']);
   }
 }
 
@@ -32,13 +33,21 @@ class TwitchApp extends StatefulWidget {
 
 class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
   List<TwitchTab> myTabs = [];
-  TabController? _tabController;
+  late PageController _pageController;
+  int _currentPageIndex = 0;
   bool isLeftHanded = false;
 
   @override
   void initState() {
     super.initState();
+    _pageController = PageController();
     _initializeApp();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeApp() async {
@@ -57,8 +66,8 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
       if (loadedTabs.isNotEmpty) {
         setState(() {
           myTabs = loadedTabs;
-          _tabController = TabController(length: myTabs.length, vsync: this);
-          _tabController!.addListener(() => setState(() {})); 
+          _pageController = PageController();
+          _currentPageIndex = 0;
         });
       }
     }
@@ -93,16 +102,16 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
       ..loadRequest(Uri.parse(url));
   }
 
-  void _addTab(String type, String channel) {
+  void _addTab(String type, String channel, String? nickname) {
     setState(() {
       myTabs.add(TwitchTab(
         type: type, 
-        channel: channel, 
+        channel: channel,
+        nickname: nickname,
         controller: _createController(_generateUrl(type, channel))
       ));
-      _tabController = TabController(length: myTabs.length, vsync: this);
-      _tabController!.addListener(() => setState(() {}));
-      _tabController!.animateTo(myTabs.length - 1);
+      _pageController.jumpToPage(myTabs.length - 1);
+      _currentPageIndex = myTabs.length - 1;
     });
     _saveTabs();
   }
@@ -111,11 +120,33 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
     setState(() {
       myTabs.removeAt(index);
       if (myTabs.isNotEmpty) {
-        _tabController = TabController(length: myTabs.length, vsync: this);
-        _tabController!.addListener(() => setState(() {}));
+        // Adjust current page index if needed
+        if (_currentPageIndex >= myTabs.length) {
+          _currentPageIndex = myTabs.length - 1;
+        }
+        // Recreate PageController to sync with new list
+        _pageController = PageController(initialPage: _currentPageIndex);
       } else {
-        _tabController = null;
         _showAddDialog();
+      }
+    });
+    _saveTabs();
+  }
+
+  void _reorderTabs(int oldIndex, int newIndex) {
+    setState(() {
+      if (oldIndex < newIndex) {
+        newIndex -= 1;
+      }
+      final TwitchTab item = myTabs.removeAt(oldIndex);
+      myTabs.insert(newIndex, item);
+      // If current page was affected, adjust the index
+      if (oldIndex == _currentPageIndex) {
+        _currentPageIndex = newIndex;
+      } else if (oldIndex < _currentPageIndex && newIndex >= _currentPageIndex) {
+        _currentPageIndex--;
+      } else if (oldIndex > _currentPageIndex && newIndex < _currentPageIndex) {
+        _currentPageIndex++;
       }
     });
     _saveTabs();
@@ -129,10 +160,10 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(icon: const Icon(Icons.add_box, color: Colors.white, size: 28), onPressed: _showAddDialog),
-          if (myTabs.isNotEmpty && _tabController != null)
+          if (myTabs.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.refresh, color: Colors.white, size: 28),
-              onPressed: () => myTabs[_tabController!.index].controller?.reload(),
+              onPressed: () => myTabs[_currentPageIndex].controller?.reload(),
             ),
         ],
       ),
@@ -142,9 +173,10 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
       body: SafeArea(
         child: myTabs.isEmpty 
           ? const Center(child: Text("No tabs open.")) 
-          : TabBarView(
-              controller: _tabController,
+          : PageView(
+              controller: _pageController,
               physics: const NeverScrollableScrollPhysics(),
+              onPageChanged: (index) => setState(() { _currentPageIndex = index; }),
               children: myTabs.map((tab) => WebViewWidget(controller: tab.controller!)).toList(),
             ),
       ),
@@ -161,68 +193,77 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
   }
 
   Widget _buildTabBar() {
-    if (myTabs.isEmpty || _tabController == null) return const SizedBox();
-    return TabBar(
-      controller: _tabController,
-      isScrollable: true,
-      tabAlignment: TabAlignment.center, // Keeps selected tab centered in the available area
-      indicatorColor: Colors.transparent, 
-      dividerColor: Colors.transparent,
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-      tabs: myTabs.asMap().entries.map((entry) {
-        int index = entry.key;
-        bool isActive = _tabController!.index == index;
+    if (myTabs.isEmpty) return const SizedBox();
+    return ReorderableListView.builder(
+      scrollDirection: Axis.horizontal,
+      onReorder: _reorderTabs,
+      buildDefaultDragHandles: false,
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+      itemCount: myTabs.length,
+      itemBuilder: (context, index) {
+        final tab = myTabs[index];
+        bool isActive = _currentPageIndex == index;
         
-        String displayName = entry.value.channel;
-        if (displayName.toLowerCase() == "deemonrider") displayName = "DR";
+        String displayName = tab.nickname ?? tab.channel;
+        if (displayName.toLowerCase() == "deemonrider" && tab.nickname == null) displayName = "DR";
         
-        IconData icon = entry.value.type == "chat" ? Icons.chat_bubble : Icons.extension;
-        if (entry.value.type == "login") {
+        IconData icon = tab.type == "chat" ? Icons.chat_bubble : Icons.extension;
+        if (tab.type == "login") {
           icon = Icons.person;
           displayName = "Login";
         }
 
-        return Container(
-          height: 42,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            // "Pressed in" look: Darker purple and slightly shadow-inset effect
-            color: isActive ? const Color(0xFF5B2B9F) : Colors.white.withAlpha(40),
-            borderRadius: BorderRadius.circular(8), 
-            border: Border.all(
-              color: isActive ? Colors.black26 : Colors.white24, 
-              width: 1.5
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 20, color: isActive ? Colors.white70 : Colors.white),
-              const SizedBox(width: 6),
-              Text(displayName, style: TextStyle(
-                color: isActive ? Colors.white : Colors.white70, 
-                fontWeight: isActive ? FontWeight.bold : FontWeight.normal, 
-                fontSize: 12
-              )),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: () => _closeTab(index),
-                child: Container(
-                  padding: const EdgeInsets.all(1),
-                  decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
-                  child: const Icon(Icons.close, size: 12, color: Colors.white70),
+        return ReorderableDragStartListener(
+          key: ValueKey(index),
+          index: index,
+          child: GestureDetector(
+            onTap: () {
+              _pageController.jumpToPage(index);
+              setState(() { _currentPageIndex = index; });
+            },
+            child: Container(
+              height: 42,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: isActive ? const Color(0xFF5B2B9F) : Colors.white.withAlpha(40),
+                borderRadius: BorderRadius.circular(8), 
+                border: Border.all(
+                  color: isActive ? Colors.black26 : Colors.white24, 
+                  width: 1.5
                 ),
               ),
-            ],
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 20, color: isActive ? Colors.white70 : Colors.white),
+                  const SizedBox(width: 6),
+                  Text(displayName, style: TextStyle(
+                    color: isActive ? Colors.white : Colors.white70, 
+                    fontWeight: isActive ? FontWeight.bold : FontWeight.normal, 
+                    fontSize: 12
+                  )),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => _closeTab(index),
+                    child: Container(
+                      padding: const EdgeInsets.all(1),
+                      decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
+                      child: const Icon(Icons.close, size: 12, color: Colors.white70),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         );
-      }).toList(),
+      },
     );
   }
 
   void _showAddDialog() {
     TextEditingController channelController = TextEditingController();
+    TextEditingController nicknameController = TextEditingController();
     showDialog(
       context: context,
       barrierDismissible: myTabs.isNotEmpty,
@@ -243,13 +284,19 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
                 controller: channelController,
                 decoration: const InputDecoration(hintText: "Channel (Defaults to deemonrider)"),
               ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: nicknameController,
+                decoration: const InputDecoration(hintText: "Nickname (Optional custom tab label)"),
+              ),
               const SizedBox(height: 15),
               ElevatedButton.icon(
                 icon: const Icon(Icons.extension),
                 label: const Text("Add Extension Panel"),
                 onPressed: () {
                   String name = channelController.text.trim().isEmpty ? "deemonrider" : channelController.text.trim();
-                  _addTab("panel", name);
+                  String? nickname = nicknameController.text.trim().isEmpty ? null : nicknameController.text.trim();
+                  _addTab("panel", name, nickname);
                   Navigator.pop(context);
                 },
               ),
@@ -259,14 +306,15 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
                 label: const Text("Add Chat"),
                 onPressed: () {
                   String name = channelController.text.trim().isEmpty ? "deemonrider" : channelController.text.trim();
-                  _addTab("chat", name);
+                  String? nickname = nicknameController.text.trim().isEmpty ? null : nicknameController.text.trim();
+                  _addTab("chat", name, nickname);
                   Navigator.pop(context);
                 },
               ),
               const Divider(),
               TextButton(
                 onPressed: () {
-                  _addTab("login", "");
+                  _addTab("login", "", null);
                   Navigator.pop(context);
                 },
                 child: const Text("Login to Twitch"),
