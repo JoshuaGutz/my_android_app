@@ -31,11 +31,23 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("upload-keystore.jks")
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEYSTORE_PASSWORD")
+        }
+    }
+
     buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+        getByName("release") {
+            // This replaces the "TODO" and the debug config
+            signingConfig = signingConfigs.getByName("release")
+        }
+        getByName("debug") {
+            // We also sign debug builds so you can update without uninstalling
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
