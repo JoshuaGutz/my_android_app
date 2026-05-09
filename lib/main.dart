@@ -24,30 +24,35 @@ class TwitchApp extends StatefulWidget {
 class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
   List<TwitchTab> myTabs = [];
   TabController? _tabController;
-  bool isLeftHanded = false; // Our new preference variable
+  bool isLeftHanded = false;
 
   @override
   void initState() {
     super.initState();
-    _loadHandedness(); // Load your preference on startup
+    _loadHandedness();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkTabsAndShowDialog());
   }
 
-  // Load the saved preference from the phone's memory
-  Future<void>_loadHandedness() async {
+  Future<void> _loadHandedness() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       isLeftHanded = prefs.getBool('isLeftHanded') ?? false;
     });
   }
 
-  // Save the preference
-  Future<void> _toggleHandedness(bool value) async {
+  // UPDATED: This now accepts the dialog's local "setDialogState" 
+  // so it can force the switch to flip visually in sync with the buttons.
+  Future<void> _toggleHandedness(bool value, StateSetter setDialogState) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isLeftHanded', value);
+    
+    // Update the main app (buttons move)
     setState(() {
       isLeftHanded = value;
     });
+    
+    // Update the dialog (switch flips)
+    setDialogState(() {}); 
   }
 
   void _checkTabsAndShowDialog() {
@@ -91,7 +96,6 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    // We define the two buttons as a reusable list
     List<Widget> actionButtons = [
       IconButton(
         icon: const Icon(Icons.add_box, color: Colors.white),
@@ -118,7 +122,6 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
         height: 85, 
         color: const Color(0xFF9146FF),
         child: Row(
-          // This flips the order of the buttons and tabs based on your setting!
           children: isLeftHanded 
             ? [...actionButtons, Expanded(child: _buildTabBar())] 
             : [Expanded(child: _buildTabBar()), ...actionButtons],
@@ -127,7 +130,6 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
     );
   }
 
-  // Helper to build the Tab portion specifically
   Widget _buildTabBar() {
     if (myTabs.isEmpty) return const SizedBox();
     return TabBar(
@@ -158,20 +160,19 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
       context: context,
       barrierDismissible: myTabs.isNotEmpty,
       builder: (context) {
-        return StatefulBuilder( // Added to handle the switch UI inside the popup
+        return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
               title: const Text("Settings & New Tab"),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Handedness Switch
                   SwitchListTile(
                     title: const Text("Left Handed Mode"),
                     value: isLeftHanded,
                     onChanged: (bool value) {
-                      _toggleHandedness(value);
-                      setDialogState(() {}); // Refresh the dialog UI
+                      // We now pass the 'setDialogState' directly into our toggle logic
+                      _toggleHandedness(value, setDialogState);
                     },
                   ),
                   const Divider(),
