@@ -11,7 +11,7 @@ void main() {
 
 class TwitchTab {
   String title;
-  String type; // "panel", "chat", or "login"
+  String type; 
   String channel;
   WebViewController controller;
   TwitchTab({required this.title, required this.type, required this.channel, required this.controller});
@@ -37,9 +37,7 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
 
   Future<void> _loadHandedness() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      isLeftHanded = prefs.getBool('isLeftHanded') ?? false;
-    });
+    setState(() { isLeftHanded = prefs.getBool('isLeftHanded') ?? false; });
   }
 
   Future<void> _toggleHandedness(bool value, StateSetter setDialogState) async {
@@ -64,12 +62,7 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
 
   void _addTab(String title, String type, String channel, String url) {
     setState(() {
-      myTabs.add(TwitchTab(
-        title: title, 
-        type: type, 
-        channel: channel, 
-        controller: _createController(url)
-      ));
+      myTabs.add(TwitchTab(title: title, type: type, channel: channel, controller: _createController(url)));
       _tabController = TabController(length: myTabs.length, vsync: this);
       _tabController!.animateTo(myTabs.length - 1);
     });
@@ -89,16 +82,15 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    // Action buttons container with a slight dark tint to separate from tabs
     Widget actionButtons = Container(
-      color: Colors.black12,
+      color: Colors.black26, // Slightly darker for better delineation
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(icon: const Icon(Icons.add_box, color: Colors.white), onPressed: _showAddDialog),
+          IconButton(icon: const Icon(Icons.add_box, color: Colors.white, size: 28), onPressed: _showAddDialog),
           if (myTabs.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.refresh, color: Colors.white),
+              icon: const Icon(Icons.refresh, color: Colors.white, size: 28),
               onPressed: () => myTabs[_tabController!.index].controller.reload(),
             ),
         ],
@@ -116,12 +108,12 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
             ),
       ),
       bottomNavigationBar: Container(
-        height: 85, 
+        height: 75, // Made it a bit more compact overall
         color: const Color(0xFF9146FF),
         child: Row(
           children: isLeftHanded 
-            ? [actionButtons, const VerticalDivider(width: 1, color: Colors.white24), Expanded(child: _buildTabBar())] 
-            : [Expanded(child: _buildTabBar()), const VerticalDivider(width: 1, color: Colors.white24), actionButtons],
+            ? [actionButtons, const VerticalDivider(width: 1, color: Colors.white30), Expanded(child: _buildTabBar())] 
+            : [Expanded(child: _buildTabBar()), const VerticalDivider(width: 1, color: Colors.white30), actionButtons],
         ),
       ),
     );
@@ -132,33 +124,41 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
     return TabBar(
       controller: _tabController,
       isScrollable: true,
-      indicatorColor: Colors.transparent, // Hide the default line
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      indicatorColor: Colors.transparent, 
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4), // Tighter spacing between tabs
       tabs: myTabs.asMap().entries.map((entry) {
-        bool isDeemon = entry.value.channel.toLowerCase() == "deemonrider";
-        IconData icon = entry.value.type == "chat" ? Icons.chat_bubble_outline : Icons.extension_outlined;
-        if (entry.value.type == "login") icon = Icons.person_outline;
+        String displayName = entry.value.channel;
+        if (displayName.toLowerCase() == "deemonrider") displayName = "DR";
+        
+        IconData icon = entry.value.type == "chat" ? Icons.chat_bubble : Icons.extension;
+        if (entry.value.type == "login") {
+          icon = Icons.person;
+          displayName = "Login";
+        }
 
         return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          height: 45, // FIXED HEIGHT for consistency
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-            color: Colors.white.withAlpha(38),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white30),
+            color: Colors.white.withAlpha(40),
+            borderRadius: BorderRadius.circular(8), // Less "pill", more "rounded square"
+            border: Border.all(color: Colors.white24),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 18, color: Colors.white),
-              if (!isDeemon && entry.value.type != "login") ...[
-                const SizedBox(width: 6),
-                Text(entry.value.channel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              ],
+              Icon(icon, size: 22, color: Colors.white), // Bigger icons
+              const SizedBox(width: 6),
+              Text(displayName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: () => _closeTab(entry.key),
-                child: const Icon(Icons.close, size: 16, color: Colors.white70),
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
+                  child: const Icon(Icons.close, size: 14, color: Colors.white),
+                ),
               ),
             ],
           ),
@@ -174,17 +174,13 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
       barrierDismissible: myTabs.isNotEmpty,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Center(child: Text("Settings & New Tab")), // Centered Title
+          title: const Center(child: Text("Settings & New Tab")),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Switch on the Left
               Row(
                 children: [
-                  Switch(
-                    value: isLeftHanded,
-                    onChanged: (val) => _toggleHandedness(val, setDialogState),
-                  ),
+                  Switch(value: isLeftHanded, onChanged: (val) => _toggleHandedness(val, setDialogState)),
                   const Text("Left Handed Mode"),
                 ],
               ),
@@ -219,7 +215,7 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
                   _addTab("Login", "login", "", "https://www.twitch.tv/login");
                   Navigator.pop(context);
                 },
-                child: const Text("Login to Twitch"), // Renamed
+                child: const Text("Login to Twitch"),
               )
             ],
           ),
