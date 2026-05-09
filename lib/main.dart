@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 void main() {
   runApp(const MaterialApp(
@@ -10,11 +11,17 @@ void main() {
 }
 
 class TwitchTab {
-  String title;
   String type; 
   String channel;
-  WebViewController controller;
-  TwitchTab({required this.title, required this.type, required this.channel, required this.controller});
+  WebViewController? controller;
+
+  TwitchTab({required this.type, required this.channel, this.controller});
+
+  Map<String, dynamic> toJson() => {'type': type, 'channel': channel};
+
+  factory TwitchTab.fromJson(Map<String, dynamic> json) {
+    return TwitchTab(type: json['type'], channel: json['channel']);
+  }
 }
 
 class TwitchApp extends StatefulWidget {
@@ -31,13 +38,46 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _loadHandedness();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkTabsAndShowDialog());
+    _initializeApp();
   }
 
-  Future<void> _loadHandedness() async {
+  Future<void> _initializeApp() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() { isLeftHanded = prefs.getBool('isLeftHanded') ?? false; });
+
+    String? savedTabsJson = prefs.getString('saved_tabs');
+    if (savedTabsJson != null) {
+      Iterable decoded = jsonDecode(savedTabsJson);
+      List<TwitchTab> loadedTabs = decoded.map((model) => TwitchTab.fromJson(model)).toList();
+      
+      for (var tab in loadedTabs) {
+        tab.controller = _createController(_generateUrl(tab.type, tab.channel));
+      }
+
+      if (loadedTabs.isNotEmpty) {
+        setState(() {
+          myTabs = loadedTabs;
+          _tabController = TabController(length: myTabs.length, vsync: this);
+          _tabController!.addListener(() => setState(() {})); 
+        });
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (myTabs.isEmpty) _showAddDialog();
+    });
+  }
+
+  String _generateUrl(String type, String channel) {
+    if (type == "login") return "https://www.twitch.tv/login";
+    if (type == "chat") return "https://www.twitch.tv/popout/$channel/chat?popout=";
+    return "https://www.twitch.tv/popout/$channel/extensions/pm0qkv9g4h87t5y6lg329oam8j7ze9/panel";
+  }
+
+  Future<void> _saveTabs() async {
+    final prefs = await SharedPreferences.getInstance();
+    String encodedData = jsonEncode(myTabs.map((t) => t.toJson()).toList());
+    await prefs.setString('saved_tabs', encodedData);
   }
 
   Future<void> _toggleHandedness(bool value, StateSetter setDialogState) async {
@@ -47,25 +87,24 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
     setDialogState(() {}); 
   }
 
-  void _checkTabsAndShowDialog() {
-    if (myTabs.isEmpty) _showAddDialog();
-  }
-
   WebViewController _createController(String url) {
     return WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
-          onNavigationRequest: (request) => NavigationDecision.navigate,
-      ))
       ..loadRequest(Uri.parse(url));
   }
 
-  void _addTab(String title, String type, String channel, String url) {
+  void _addTab(String type, String channel) {
     setState(() {
-      myTabs.add(TwitchTab(title: title, type: type, channel: channel, controller: _createController(url)));
+      myTabs.add(TwitchTab(
+        type: type, 
+        channel: channel, 
+        controller: _createController(_generateUrl(type, channel))
+      ));
       _tabController = TabController(length: myTabs.length, vsync: this);
+      _tabController!.addListener(() => setState(() {}));
       _tabController!.animateTo(myTabs.length - 1);
     });
+    _saveTabs();
   }
 
   void _closeTab(int index) {
@@ -73,25 +112,27 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
       myTabs.removeAt(index);
       if (myTabs.isNotEmpty) {
         _tabController = TabController(length: myTabs.length, vsync: this);
+        _tabController!.addListener(() => setState(() {}));
       } else {
         _tabController = null;
-        _checkTabsAndShowDialog();
+        _showAddDialog();
       }
     });
+    _saveTabs();
   }
 
   @override
   Widget build(BuildContext context) {
     Widget actionButtons = Container(
-      color: Colors.black38, // Darker for better delineation
+      color: Colors.black45, // Slightly darker block for buttons
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(icon: const Icon(Icons.add_box, color: Colors.white, size: 30), onPressed: _showAddDialog),
-          if (myTabs.isNotEmpty)
+          IconButton(icon: const Icon(Icons.add_box, color: Colors.white, size: 28), onPressed: _showAddDialog),
+          if (myTabs.isNotEmpty && _tabController != null)
             IconButton(
-              icon: const Icon(Icons.refresh, color: Colors.white, size: 30),
-              onPressed: () => myTabs[_tabController!.index].controller.reload(),
+              icon: const Icon(Icons.refresh, color: Colors.white, size: 28),
+              onPressed: () => myTabs[_tabController!.index].controller?.reload(),
             ),
         ],
       ),
@@ -104,30 +145,35 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
           : TabBarView(
               controller: _tabController,
               physics: const NeverScrollableScrollPhysics(),
-              children: myTabs.map((tab) => WebViewWidget(controller: tab.controller)).toList(),
+              children: myTabs.map((tab) => WebViewWidget(controller: tab.controller!)).toList(),
             ),
       ),
       bottomNavigationBar: Container(
-        height: 70, // Slightly more compact
+        height: 70,
         color: const Color(0xFF9146FF),
         child: Row(
           children: isLeftHanded 
-            ? [actionButtons, const VerticalDivider(width: 1, color: Colors.white30), Expanded(child: _buildTabBar())] 
-            : [Expanded(child: _buildTabBar()), const VerticalDivider(width: 1, color: Colors.white30), actionButtons],
+            ? [actionButtons, const VerticalDivider(width: 1, color: Colors.white24), Expanded(child: _buildTabBar())] 
+            : [Expanded(child: _buildTabBar()), const VerticalDivider(width: 1, color: Colors.white24), actionButtons],
         ),
       ),
     );
   }
 
   Widget _buildTabBar() {
-    if (myTabs.isEmpty) return const SizedBox();
+    if (myTabs.isEmpty || _tabController == null) return const SizedBox();
     return TabBar(
       controller: _tabController,
       isScrollable: true,
+      tabAlignment: TabAlignment.center, // Keeps selected tab centered in the available area
       indicatorColor: Colors.transparent, 
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      labelPadding: const EdgeInsets.symmetric(horizontal: 2), // Even tighter spacing
+      dividerColor: Colors.transparent,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
       tabs: myTabs.asMap().entries.map((entry) {
+        int index = entry.key;
+        bool isActive = _tabController!.index == index;
+        
         String displayName = entry.value.channel;
         if (displayName.toLowerCase() == "deemonrider") displayName = "DR";
         
@@ -138,26 +184,34 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
         }
 
         return Container(
-          height: 42, // Consistent height
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          height: 42,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-            color: Colors.white.withAlpha(45),
-            borderRadius: BorderRadius.circular(6), 
-            border: Border.all(color: Colors.white24),
+            // "Pressed in" look: Darker purple and slightly shadow-inset effect
+            color: isActive ? const Color(0xFF5B2B9F) : Colors.white.withAlpha(40),
+            borderRadius: BorderRadius.circular(8), 
+            border: Border.all(
+              color: isActive ? Colors.black26 : Colors.white24, 
+              width: 1.5
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 24, color: Colors.white), // Beefy icon
-              const SizedBox(width: 4),
-              Text(displayName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+              Icon(icon, size: 20, color: isActive ? Colors.white70 : Colors.white),
               const SizedBox(width: 6),
+              Text(displayName, style: TextStyle(
+                color: isActive ? Colors.white : Colors.white70, 
+                fontWeight: isActive ? FontWeight.bold : FontWeight.normal, 
+                fontSize: 12
+              )),
+              const SizedBox(width: 8),
               GestureDetector(
-                onTap: () => _closeTab(entry.key),
+                onTap: () => _closeTab(index),
                 child: Container(
                   padding: const EdgeInsets.all(1),
-                  decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                  child: const Icon(Icons.close, size: 12, color: Colors.white),
+                  decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
+                  child: const Icon(Icons.close, size: 12, color: Colors.white70),
                 ),
               ),
             ],
@@ -195,7 +249,7 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
                 label: const Text("Add Extension Panel"),
                 onPressed: () {
                   String name = channelController.text.trim().isEmpty ? "deemonrider" : channelController.text.trim();
-                  _addTab("Panel", "panel", name, "https://www.twitch.tv/popout/$name/extensions/pm0qkv9g4h87t5y6lg329oam8j7ze9/panel");
+                  _addTab("panel", name);
                   Navigator.pop(context);
                 },
               ),
@@ -205,14 +259,14 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
                 label: const Text("Add Chat"),
                 onPressed: () {
                   String name = channelController.text.trim().isEmpty ? "deemonrider" : channelController.text.trim();
-                  _addTab("Chat", "chat", name, "https://www.twitch.tv/popout/$name/chat?popout=");
+                  _addTab("chat", name);
                   Navigator.pop(context);
                 },
               ),
               const Divider(),
               TextButton(
                 onPressed: () {
-                  _addTab("Login", "login", "", "https://www.twitch.tv/login");
+                  _addTab("login", "");
                   Navigator.pop(context);
                 },
                 child: const Text("Login to Twitch"),
