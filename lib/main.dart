@@ -83,14 +83,14 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     Widget actionButtons = Container(
-      color: Colors.black26, // Slightly darker for better delineation
+      color: Colors.black38, // Darker for better delineation
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(icon: const Icon(Icons.add_box, color: Colors.white, size: 28), onPressed: _showAddDialog),
+          IconButton(icon: const Icon(Icons.add_box, color: Colors.white, size: 30), onPressed: _showAddDialog),
           if (myTabs.isNotEmpty)
             IconButton(
-              icon: const Icon(Icons.refresh, color: Colors.white, size: 28),
+              icon: const Icon(Icons.refresh, color: Colors.white, size: 30),
               onPressed: () => myTabs[_tabController!.index].controller.reload(),
             ),
         ],
@@ -108,7 +108,7 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
             ),
       ),
       bottomNavigationBar: Container(
-        height: 75, // Made it a bit more compact overall
+        height: 70, // Slightly more compact
         color: const Color(0xFF9146FF),
         child: Row(
           children: isLeftHanded 
@@ -125,8 +125,8 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
       controller: _tabController,
       isScrollable: true,
       indicatorColor: Colors.transparent, 
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      labelPadding: const EdgeInsets.symmetric(horizontal: 4), // Tighter spacing between tabs
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 2), // Even tighter spacing
       tabs: myTabs.asMap().entries.map((entry) {
         String displayName = entry.value.channel;
         if (displayName.toLowerCase() == "deemonrider") displayName = "DR";
@@ -138,26 +138,26 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
         }
 
         return Container(
-          height: 45, // FIXED HEIGHT for consistency
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          height: 42, // Consistent height
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
-            color: Colors.white.withAlpha(40),
-            borderRadius: BorderRadius.circular(8), // Less "pill", more "rounded square"
+            color: Colors.white.withAlpha(45),
+            borderRadius: BorderRadius.circular(6), 
             border: Border.all(color: Colors.white24),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 22, color: Colors.white), // Bigger icons
+              Icon(icon, size: 24, color: Colors.white), // Beefy icon
+              const SizedBox(width: 4),
+              Text(displayName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
               const SizedBox(width: 6),
-              Text(displayName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-              const SizedBox(width: 8),
               GestureDetector(
                 onTap: () => _closeTab(entry.key),
                 child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
-                  child: const Icon(Icons.close, size: 14, color: Colors.white),
+                  padding: const EdgeInsets.all(1),
+                  decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                  child: const Icon(Icons.close, size: 12, color: Colors.white),
                 ),
               ),
             ],
