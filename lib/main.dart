@@ -110,8 +110,14 @@ class _TwitchAppState extends State<TwitchApp> with TickerProviderStateMixin {
         nickname: nickname,
         controller: _createController(_generateUrl(type, channel))
       ));
-      _pageController.jumpToPage(myTabs.length - 1);
-      _currentPageIndex = myTabs.length - 1;
+      // If this is the first tab, recreate the PageController
+      if (myTabs.length == 1) {
+        _pageController = PageController();
+        _currentPageIndex = 0;
+      } else {
+        _pageController.jumpToPage(myTabs.length - 1);
+        _currentPageIndex = myTabs.length - 1;
+      }
     });
     _saveTabs();
   }
